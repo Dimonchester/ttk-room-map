@@ -1,10 +1,10 @@
 <script setup lang="ts">
-// пусто
+import DevelopmentStub from "@/components/common/DevelopmentStub.vue";
 </script>
 
 <template>
-  <main class="mx-auto flex min-h-full max-w-md flex-col justify-center gap-3 p-6">
-    <h1 class="text-3xl font-bold text-brand">404</h1>
-    <p class="text-neutral-600">Такой страницы нет.</p>
-  </main>
+  <DevelopmentStub
+    title="Страница не найдена (404)"
+    description="Запрашиваемая страница не существует или была удалена."
+  />
 </template>
