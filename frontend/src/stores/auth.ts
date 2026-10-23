@@ -12,6 +12,11 @@ export const useAuthStore = defineStore('auth', () => {
 
   /** Пробует восстановить сессию по refresh-cookie (один раз за загрузку страницы). */
   function restore(): Promise<boolean> {
+    // Если у нас тестовый мок-токен, сразу считаем сессию валидной, не стучась на бэк
+    if (accessToken.value?.startsWith('mock-')) {
+      return Promise.resolve(true)
+    }
+
     restoring ??= refreshSession().then(() => isAuthed.value)
     return restoring
   }

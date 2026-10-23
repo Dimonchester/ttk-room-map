@@ -1,3 +1,7 @@
+<script setup lang="ts">
+// Главный корень приложения
+</script>
+
 <template>
-  <RouterView />
+  <router-view />
 </template>
