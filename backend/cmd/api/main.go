@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/Dimonchester/ttk-room-map/backend/internal/auth"
 	"github.com/Dimonchester/ttk-room-map/backend/internal/database"
 	"github.com/Dimonchester/ttk-room-map/backend/internal/middleware"
 	"github.com/Dimonchester/ttk-room-map/backend/internal/user"
@@ -43,7 +44,12 @@ func main() {
 	log.Println("migrations applied")
 
 	userRepo := user.NewRepository(pool)
-	_ = userRepo
+	tokenManager := auth.NewTokenManager(
+		os.Getenv("JWT_SECRET"),
+		15*time.Minute,
+		7*24*time.Hour,
+	)
+	authHandler := auth.NewHandler(userRepo, tokenManager)
 
 	mux := http.NewServeMux()
 
@@ -70,6 +76,8 @@ func main() {
 			"message": "pong from backend",
 		})
 	})
+
+	authHandler.RegisterRoutes(mux)
 
 	handler := middleware.CORS(mux)
 
