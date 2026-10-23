@@ -2,19 +2,20 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/Dimonchester/ttk-room-map/backend/internal/database"
+	"github.com/Dimonchester/ttk-room-map/backend/internal/middleware"
+	"github.com/Dimonchester/ttk-room-map/backend/internal/user"
 	"github.com/joho/godotenv"
 )
 
 func main() {
-	// 1. Загружаем .env (если файла нет — не падаем, просто идём дальше
-	//    и полагаемся на переменные окружения системы).
 	if err := godotenv.Load(); err != nil {
 		log.Println("warning: .env not found, using system env")
 	}
@@ -24,38 +25,31 @@ func main() {
 		port = "8080"
 	}
 
-	// 2. Подключаемся к PostgreSQL.
-	dsn := fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
-		os.Getenv("DB_HOST"),
-		os.Getenv("DB_PORT"),
-		os.Getenv("DB_USER"),
-		os.Getenv("DB_PASSWORD"),
-		os.Getenv("DB_NAME"),
-		os.Getenv("DB_SSLMODE"),
-	)
+	ctx := context.Background()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	pool, err := pgxpool.New(ctx, dsn)
+	pool, err := database.NewPool(ctx)
 	if err != nil {
-		log.Fatalf("unable to create connection pool: %v", err)
+		log.Fatalf("database connection failed: %v", err)
 	}
 	defer pool.Close()
-
-	// 3. Проверяем, что БД реально отвечает (а не просто пул создался).
-	if err := pool.Ping(ctx); err != nil {
-		log.Fatalf("unable to ping database: %v", err)
-	}
 	log.Println("connected to PostgreSQL")
 
-	// 4. HTTP-сервер. Передаём pool в хендлеры через замыкание —
-	//    позже его заменит полноценный router.
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	migrateCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	if err := database.Migrate(migrateCtx, pool); err != nil {
+		log.Fatalf("database migration failed: %v", err)
+	}
+	log.Println("migrations applied")
+
+	userRepo := user.NewRepository(pool)
+	_ = userRepo
+
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		// Проверяем БД в /health — удобно для мониторинга.
 		pingCtx, pingCancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer pingCancel()
 
@@ -68,8 +62,19 @@ func main() {
 		fmt.Fprint(w, `{"status":"ok","db":"ok"}`)
 	})
 
+	mux.HandleFunc("GET /api/ping", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"status":  "ok",
+			"message": "pong from backend",
+		})
+	})
+
+	handler := middleware.CORS(mux)
+
 	log.Printf("listening on :%s", port)
-	if err := http.ListenAndServe(":"+port, nil); err != nil {
+	if err := http.ListenAndServe(":"+port, handler); err != nil {
 		log.Fatal(err)
 	}
 }
