@@ -2,7 +2,8 @@
 import { ref } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
-import { Mail, Lock, ArrowRight } from "lucide-vue-next";
+import { setMockSession } from "@/api/session";
+import { Mail, Lock, ArrowRight, FlaskConical } from "lucide-vue-next";
 
 const auth = useAuthStore();
 const router = useRouter();
@@ -16,13 +17,20 @@ async function handleLogin() {
   loading.value = true;
   try {
     await auth.login(email.value, password.value);
-    const redirectPath = (route.query.redirect as string) || "/";
+    const redirectPath = (route.query.redirect as string) || "/maps";
     await router.push(redirectPath);
-  } catch (e) {
-    alert("Ошибка входа. Проверьте правильность логина и пароля.");
+  } catch {
+    alert("Бэкенд еще не запущен.");
   } finally {
     loading.value = false;
   }
+}
+
+// Тестовый вход: проставляем данные в session.ts и переходим в ЛК
+async function handleTestLogin() {
+  setMockSession();
+  const redirectPath = (route.query.redirect as string) || "/maps";
+  await router.push(redirectPath);
 }
 </script>
 
@@ -41,7 +49,7 @@ async function handleLogin() {
           type="email"
           required
           placeholder="admin@ttk.ru"
-          class="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:outline-none text-sm"
+          class="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:outline-hidden text-sm"
         />
       </div>
     </div>
@@ -58,17 +66,29 @@ async function handleLogin() {
           type="password"
           required
           placeholder="••••••••"
-          class="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:outline-none text-sm"
+          class="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:outline-hidden text-sm"
         />
       </div>
     </div>
+
     <button
       type="submit"
       :disabled="loading"
-      class="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white font-medium py-2.5 rounded-xl transition-colors shadow-sm text-sm disabled:opacity-50"
+      class="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white font-medium py-2.5 rounded-xl transition-colors shadow-xs text-sm disabled:opacity-50 cursor-pointer"
     >
       <span>{{ loading ? "Вход..." : "Войти в систему" }}</span>
       <ArrowRight class="w-4 h-4" />
     </button>
+
+    <div class="pt-2 border-t border-gray-100 mt-4">
+      <button
+        type="button"
+        @click="handleTestLogin"
+        class="w-full flex items-center justify-center gap-2 bg-amber-50 hover:bg-amber-100 text-amber-800 font-medium py-2.5 rounded-xl transition-colors text-sm border border-amber-200 cursor-pointer"
+      >
+        <FlaskConical class="w-4 h-4 text-amber-600" />
+        <span>Тестовый вход</span>
+      </button>
+    </div>
   </form>
 </template>

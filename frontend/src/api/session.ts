@@ -16,6 +16,15 @@ export function clearSession(): void {
   currentUser.value = null
 }
 
+export function setMockSession(): void {
+  accessToken.value = 'mock-test-token-12345'
+  currentUser.value = {
+    id: 'd3b07384-d113-4ec2-a4f9-2603f29b465d',
+    email: 'admin@ttk.ru',
+  } as User
+}
+
+
 let inFlight: Promise<boolean> | null = null
 
 /** Обновляет access-токен. Параллельные вызовы объединяются в один запрос (single-flight). */
