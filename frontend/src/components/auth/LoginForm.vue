@@ -14,6 +14,7 @@ const password = ref("");
 const loading = ref(false);
 
 async function handleLogin() {
+  console.log("Нажата кнопка: Вход в систему (отправка POST /api/auth/login)");
   loading.value = true;
   try {
     await auth.login(email.value, password.value);
@@ -28,6 +29,7 @@ async function handleLogin() {
 
 // Тестовый вход: проставляем данные в session.ts и переходим в ЛК
 async function handleTestLogin() {
+  console.log(" Нажата кнопка:  Тестовый вход (пропуск бэкенда)");
   setMockSession();
   const redirectPath = (route.query.redirect as string) || "/maps";
   await router.push(redirectPath);

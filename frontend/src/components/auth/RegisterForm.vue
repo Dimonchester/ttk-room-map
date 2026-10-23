@@ -12,11 +12,16 @@ const password = ref("");
 const loading = ref(false);
 
 async function handleRegister() {
+  console.log(
+    "Нажата кнопка: Зарегистрироваться (отправка POST /api/auth/register)",
+  );
   loading.value = true;
   try {
     await auth.register(email.value, password.value);
+    console.log("Регистрация прошла успешно");
     await router.push("/");
   } catch (e) {
+    console.warn("Ошибка регистрации (возможно, email уже занят - статус 409)");
     alert(
       "Ошибка регистрации. Возможно, пользователь с таким email уже существует.",
     );
