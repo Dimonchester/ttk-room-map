@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Dimonchester/ttk-room-map/backend/internal/database"
+	"github.com/Dimonchester/ttk-room-map/backend/internal/middleware"
 	"github.com/Dimonchester/ttk-room-map/backend/internal/user"
 	"github.com/joho/godotenv"
 )
@@ -43,7 +45,9 @@ func main() {
 	userRepo := user.NewRepository(pool)
 	_ = userRepo
 
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
 		pingCtx, pingCancel := context.WithTimeout(r.Context(), 2*time.Second)
@@ -58,8 +62,19 @@ func main() {
 		fmt.Fprint(w, `{"status":"ok","db":"ok"}`)
 	})
 
+	mux.HandleFunc("GET /api/ping", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"status":  "ok",
+			"message": "pong from backend",
+		})
+	})
+
+	handler := middleware.CORS(mux)
+
 	log.Printf("listening on :%s", port)
-	if err := http.ListenAndServe(":"+port, nil); err != nil {
+	if err := http.ListenAndServe(":"+port, handler); err != nil {
 		log.Fatal(err)
 	}
 }
