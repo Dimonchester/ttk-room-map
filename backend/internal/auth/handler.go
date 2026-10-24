@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Dimonchester/ttk-room-map/backend/internal/logger"
 	"github.com/Dimonchester/ttk-room-map/backend/internal/user"
 )
 
@@ -69,12 +70,14 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	var req CredentialsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logger.Warn(logger.CatAuth, "регистрация: некорректный JSON от клиента: %v", err)
 		writeProblem(w, http.StatusBadRequest, "invalid_json", "Некорректный формат JSON", nil)
 		return
 	}
 
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 	if fields := validateCredentials(req.Email, req.Password); len(fields) > 0 {
+		logger.Warn(logger.CatAuth, "регистрация: ошибка валидации для email=%s", req.Email)
 		writeProblem(w, http.StatusUnprocessableEntity, "validation_error", "Ошибка валидации входных данных", fields)
 		return
 	}
@@ -97,27 +100,32 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if errors.Is(err, user.ErrInvalidRole) {
+			logger.Warn(logger.CatAuth, "регистрация: передана недопустимая роль role=%s", role)
 			writeProblem(w, http.StatusUnprocessableEntity, "invalid_role", "Недопустимая роль пользователя", []FieldError{
 				{Field: "role", Code: "invalid_role", Message: "Допустимые значения: organizer, visitor"},
 			})
 			return
 		}
+		logger.Error(logger.CatAuth, "внутренняя ошибка при регистрации email=%s: %v", req.Email, err)
 		writeProblem(w, http.StatusInternalServerError, "internal_error", "Не удалось создать пользователя", nil)
 		return
 	}
 
+	logger.Info(logger.CatAuth, "успешная регистрация пользователя id=%s email=%s", createdUser.ID, createdUser.Email)
 	h.issueSession(w, http.StatusCreated, createdUser)
 }
 
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	var req CredentialsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logger.Warn(logger.CatAuth, "вход: некорректный JSON от клиента: %v", err)
 		writeProblem(w, http.StatusBadRequest, "invalid_json", "Некорректный формат JSON", nil)
 		return
 	}
 
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 	if fields := validateCredentials(req.Email, req.Password); len(fields) > 0 {
+		logger.Warn(logger.CatAuth, "вход: ошибка валидации для email=%s", req.Email)
 		writeProblem(w, http.StatusUnprocessableEntity, "validation_error", "Ошибка валидации входных данных", fields)
 		return
 	}
@@ -125,24 +133,29 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	u, err := h.users.GetByEmail(r.Context(), req.Email)
 	if err != nil {
 		if errors.Is(err, user.ErrNotFound) {
+			logger.Warn(logger.CatAuth, "неудачный вход: пользователь email=%s не найден", req.Email)
 			writeProblem(w, http.StatusUnauthorized, "invalid_credentials", "Неверный email или пароль", nil)
 			return
 		}
+		logger.Error(logger.CatAuth, "ошибка обращения к БД при входе email=%s: %v", req.Email, err)
 		writeProblem(w, http.StatusInternalServerError, "internal_error", "Ошибка при проверке учетных данных", nil)
 		return
 	}
 
 	if u.PasswordHash != req.Password {
+		logger.Warn(logger.CatAuth, "неудачный вход: неверный пароль для email=%s", req.Email)
 		writeProblem(w, http.StatusUnauthorized, "invalid_credentials", "Неверный email или пароль", nil)
 		return
 	}
 
+	logger.Info(logger.CatAuth, "успешный вход пользователя id=%s email=%s", u.ID, u.Email)
 	h.issueSession(w, http.StatusOK, u)
 }
 
 func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie(refreshCookieName)
 	if err != nil || cookie.Value == "" {
+		logger.Warn(logger.CatAuth, "обновление токена: отсутствует cookie refresh_token")
 		writeProblem(w, http.StatusUnauthorized, "unauthorized", "Отсутствует refresh-токен", nil)
 		return
 	}
@@ -150,6 +163,7 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	claims, err := h.tokens.Verify(cookie.Value, TokenTypeRefresh)
 	if err != nil {
 		h.clearRefreshCookie(w)
+		logger.Warn(logger.CatAuth, "обновление токена: невалидный refresh_token: %v", err)
 		writeProblem(w, http.StatusUnauthorized, "invalid_token", "Недействительный или истекший refresh-токен", nil)
 		return
 	}
@@ -157,15 +171,18 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	u, err := h.users.GetByID(r.Context(), claims.Sub)
 	if err != nil {
 		h.clearRefreshCookie(w)
+		logger.Warn(logger.CatAuth, "обновление токена: пользователь id=%s не найден", claims.Sub)
 		writeProblem(w, http.StatusUnauthorized, "user_not_found", "Пользователь не найден", nil)
 		return
 	}
 
+	logger.Info(logger.CatAuth, "обновлена сессия для пользователя id=%s", u.ID)
 	h.issueSession(w, http.StatusOK, u)
 }
 
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	h.clearRefreshCookie(w)
+	logger.Info(logger.CatAuth, "выход пользователя из системы")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -182,6 +199,7 @@ func (h *Handler) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		if !strings.HasPrefix(authHeader, "Bearer ") {
+			logger.Warn(logger.CatAuth, "доступ запрещен к %s: нет заголовка Authorization Bearer", r.URL.Path)
 			writeProblem(w, http.StatusUnauthorized, "unauthorized", "Отсутствует токен авторизации", nil)
 			return
 		}
@@ -189,12 +207,14 @@ func (h *Handler) RequireAuth(next http.Handler) http.Handler {
 		tokenStr := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
 		claims, err := h.tokens.Verify(tokenStr, TokenTypeAccess)
 		if err != nil {
+			logger.Warn(logger.CatAuth, "доступ запрещен к %s: невалидный access-токен (%v)", r.URL.Path, err)
 			writeProblem(w, http.StatusUnauthorized, "invalid_token", "Недействительный или истекший access-токен", nil)
 			return
 		}
 
 		u, err := h.users.GetByID(r.Context(), claims.Sub)
 		if err != nil {
+			logger.Warn(logger.CatAuth, "доступ запрещен к %s: пользователь id=%s не найден", r.URL.Path, claims.Sub)
 			writeProblem(w, http.StatusUnauthorized, "unauthorized", "Пользователь не найден", nil)
 			return
 		}
@@ -212,12 +232,14 @@ func UserFromContext(ctx context.Context) (*user.User, bool) {
 func (h *Handler) issueSession(w http.ResponseWriter, status int, u *user.User) {
 	accessToken, err := h.tokens.GenerateAccessToken(u)
 	if err != nil {
+		logger.Error(logger.CatAuth, "ошибка генерации access-токена для id=%s: %v", u.ID, err)
 		writeProblem(w, http.StatusInternalServerError, "token_error", "Не удалось сгенерировать токен", nil)
 		return
 	}
 
 	refreshToken, err := h.tokens.GenerateRefreshToken(u)
 	if err != nil {
+		logger.Error(logger.CatAuth, "ошибка генерации refresh-токена для id=%s: %v", u.ID, err)
 		writeProblem(w, http.StatusInternalServerError, "token_error", "Не удалось сгенерировать refresh-токен", nil)
 		return
 	}

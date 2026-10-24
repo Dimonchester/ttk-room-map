@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Dimonchester/ttk-room-map/backend/internal/logger"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -58,11 +59,14 @@ func (r *Repository) Create(ctx context.Context, in CreateUserInput) (*User, err
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			logger.Warn(logger.CatDB, "попытка создания дубликата пользователя email=%s (код PG 23505)", email)
 			return nil, ErrEmailTaken
 		}
+		logger.Error(logger.CatDB, "ошибка SQL при создании пользователя email=%s: %v", email, err)
 		return nil, fmt.Errorf("insert user: %w", err)
 	}
 
+	logger.Info(logger.CatDB, "создан пользователь в БД id=%s email=%s role=%s", u.ID, u.Email, u.Role)
 	return &u, nil
 }
 
@@ -88,6 +92,7 @@ func (r *Repository) GetByEmail(ctx context.Context, email string) (*User, error
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
+		logger.Error(logger.CatDB, "ошибка SQL при поиске пользователя по email=%s: %v", email, err)
 		return nil, fmt.Errorf("get user by email: %w", err)
 	}
 
@@ -114,6 +119,7 @@ func (r *Repository) GetByID(ctx context.Context, id string) (*User, error) {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
+		logger.Error(logger.CatDB, "ошибка SQL при поиске пользователя по id=%s: %v", id, err)
 		return nil, fmt.Errorf("get user by id: %w", err)
 	}
 

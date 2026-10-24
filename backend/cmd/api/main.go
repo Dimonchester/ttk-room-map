@@ -11,14 +11,21 @@ import (
 
 	"github.com/Dimonchester/ttk-room-map/backend/internal/auth"
 	"github.com/Dimonchester/ttk-room-map/backend/internal/database"
+	"github.com/Dimonchester/ttk-room-map/backend/internal/logger"
 	"github.com/Dimonchester/ttk-room-map/backend/internal/middleware"
+	"github.com/Dimonchester/ttk-room-map/backend/internal/space"
 	"github.com/Dimonchester/ttk-room-map/backend/internal/user"
 	"github.com/joho/godotenv"
 )
 
 func main() {
+	if err := logger.Init("logs"); err != nil {
+		log.Fatalf("failed to initialize logger: %v", err)
+	}
+	defer logger.Close()
+
 	if err := godotenv.Load(); err != nil {
-		log.Println("warning: .env not found, using system env")
+		logger.Warn(logger.CatSystem, "файл .env не найден, используются системные переменные окружения")
 	}
 
 	port := os.Getenv("PORT")
@@ -26,22 +33,27 @@ func main() {
 		port = "8080"
 	}
 
+	logger.Info(logger.CatSystem, "запуск backend-сервера на порту :%s", port)
+
 	ctx := context.Background()
 
 	pool, err := database.NewPool(ctx)
 	if err != nil {
-		log.Fatalf("database connection failed: %v", err)
+		logger.Fatal(logger.CatDB, "критическая ошибка подключения к БД: %v", err)
 	}
 	defer pool.Close()
-	log.Println("connected to PostgreSQL")
 
 	migrateCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	if err := database.Migrate(migrateCtx, pool); err != nil {
-		log.Fatalf("database migration failed: %v", err)
+		logger.Fatal(logger.CatDB, "критическая ошибка миграции БД: %v", err)
 	}
-	log.Println("migrations applied")
+
+	mediaProcessor, err := space.NewMediaProcessor("uploads")
+	if err != nil {
+		logger.Fatal(logger.CatSystem, "ошибка инициализации каталога загрузок: %v", err)
+	}
 
 	userRepo := user.NewRepository(pool)
 	tokenManager := auth.NewTokenManager(
@@ -50,6 +62,9 @@ func main() {
 		7*24*time.Hour,
 	)
 	authHandler := auth.NewHandler(userRepo, tokenManager)
+
+	spaceRepo := space.NewRepository(pool)
+	spaceHandler := space.NewHandler(spaceRepo, mediaProcessor, authHandler)
 
 	mux := http.NewServeMux()
 
@@ -60,6 +75,7 @@ func main() {
 		defer pingCancel()
 
 		if err := pool.Ping(pingCtx); err != nil {
+			logger.Error(logger.CatDB, "проверка /health не пройдена: БД недоступна: %v", err)
 			w.WriteHeader(http.StatusServiceUnavailable)
 			fmt.Fprintf(w, `{"status":"error","db":"%s"}`, err.Error())
 			return
@@ -77,12 +93,15 @@ func main() {
 		})
 	})
 
+	mux.Handle("GET /uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir("uploads"))))
+
 	authHandler.RegisterRoutes(mux)
+	spaceHandler.RegisterRoutes(mux)
 
-	handler := middleware.CORS(mux)
+	handler := middleware.CORS(middleware.RequestLogger(mux))
 
-	log.Printf("listening on :%s", port)
+	logger.Info(logger.CatSystem, "сервер готов и слушает порт :%s", port)
 	if err := http.ListenAndServe(":"+port, handler); err != nil {
-		log.Fatal(err)
+		logger.Fatal(logger.CatSystem, "остановка HTTP-сервера с ошибкой: %v", err)
 	}
 }

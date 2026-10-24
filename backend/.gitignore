@@ -1,1 +1,5 @@
 .env
+api
+cookies.txt
+logs/
+uploads/

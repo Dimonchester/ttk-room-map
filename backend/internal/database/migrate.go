@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"sort"
 
+	"github.com/Dimonchester/ttk-room-map/backend/internal/logger"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -21,11 +22,13 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	);`
 
 	if _, err := pool.Exec(ctx, initTable); err != nil {
+		logger.Error(logger.CatDB, "не удалось создать таблицу schema_migrations: %v", err)
 		return fmt.Errorf("create schema_migrations: %w", err)
 	}
 
 	entries, err := fs.ReadDir(migrationsFS, "migrations")
 	if err != nil {
+		logger.Error(logger.CatSystem, "ошибка чтения встроенных файлов миграций: %v", err)
 		return fmt.Errorf("read migrations dir: %w", err)
 	}
 
@@ -42,6 +45,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		var exists bool
 		err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = $1)", version).Scan(&exists)
 		if err != nil {
+			logger.Error(logger.CatDB, "ошибка проверки статуса миграции %s: %v", version, err)
 			return fmt.Errorf("check migration %s: %w", version, err)
 		}
 		if exists {
@@ -50,28 +54,36 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 
 		content, err := fs.ReadFile(migrationsFS, "migrations/"+version)
 		if err != nil {
+			logger.Error(logger.CatSystem, "ошибка чтения файла миграции %s: %v", version, err)
 			return fmt.Errorf("read migration file %s: %w", version, err)
 		}
 
 		tx, err := pool.Begin(ctx)
 		if err != nil {
+			logger.Error(logger.CatDB, "ошибка старта транзакции для миграции %s: %v", version, err)
 			return fmt.Errorf("begin tx for %s: %w", version, err)
 		}
 
 		if _, err := tx.Exec(ctx, string(content)); err != nil {
 			_ = tx.Rollback(ctx)
+			logger.Error(logger.CatDB, "ошибка выполнения SQL в миграции %s: %v", version, err)
 			return fmt.Errorf("execute migration %s: %w", version, err)
 		}
 
 		if _, err := tx.Exec(ctx, "INSERT INTO schema_migrations (version) VALUES ($1)", version); err != nil {
 			_ = tx.Rollback(ctx)
+			logger.Error(logger.CatDB, "ошибка фиксации версии миграции %s: %v", version, err)
 			return fmt.Errorf("record migration %s: %w", version, err)
 		}
 
 		if err := tx.Commit(ctx); err != nil {
+			logger.Error(logger.CatDB, "ошибка коммита миграции %s: %v", version, err)
 			return fmt.Errorf("commit migration %s: %w", version, err)
 		}
+
+		logger.Info(logger.CatDB, "применена миграция %s", version)
 	}
 
+	logger.Info(logger.CatDB, "все миграции БД актуальны")
 	return nil
 }
